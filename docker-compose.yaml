@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+
+  loki:
+    image: grafana/loki:latest
+    command: -config.file=/etc/loki/loki-local-config.yaml
+    user: "0"
+    ports:
+      - "3100:3100"                                   # loki needs to be exposed so it receives logs
+    # environment:
+      # - JAEGER_AGENT_HOST=tempo
+      # - JAEGER_ENDPOINT=http://tempo:14268/api/traces # send traces to Tempo
+      # - JAEGER_SAMPLER_TYPE=const
+      # - JAEGER_SAMPLER_PARAM=1
+    volumes:
+      - ./data/loki/etc/loki/loki-local-config.yaml:/etc/loki/loki-local-config.yaml
+      - ./data/loki/tmp/loki:/tmp/loki
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo-local.yaml"]
+    volumes:
+      - ./data/tempo/etc/tempo-local.yaml:/etc/tempo-local.yaml
+      - ./data/tempo/tmp/tempo:/tmp/tempo
+    restart: unless-stopped  
+    ports:
+      - "14268:14268"  # jaeger ingest, Jaeger - Thrift HTTP
+      - "14250:14250"  # Jaeger - GRPC
+      - "55680:55680"  # OpenTelemetry
+      - "3102:3100"   # tempo
+
+  promtail:
+    image: grafana/promtail:latest
+    command: -config.file=/etc/promtail/promtail-local-config.yaml
+    volumes:
+      - ./data/promtail/etc/promtail/promtail-local-config.yaml:/etc/promtail/promtail-local-config.yaml
+      - ./data/promtail/app/logs:/app/logs
+    depends_on:
+      - loki
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./data/prometheus/etc/prometheus.yaml:/etc/prometheus.yaml
+    command: --config.file=/etc/prometheus.yaml
+    entrypoint:
+      - /bin/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - ./data/grafana/etc/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./data/grafana/etc/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./data/grafana/var/lib/grafana/dashboards:/var/lib/grafana/dashboards
+    # environment:
+      # - GF_AUTH_ANONYMOUS_ENABLED=true
+      # - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      # - GF_AUTH_DISABLE_LOGIN_FORM=true
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+  
+  # tempo-query:
+  #   image: grafana/tempo-query:0.7.0
+  #   command: ["--grpc-storage-plugin.configuration-file=/etc/tempo-query.yaml"]
+  #   volumes:
+  #     - ./etc/tempo-query.yaml:/etc/tempo-query.yaml
+  #   ports:
+  #     - "16686:16686"  # jaeger-ui
+  #   depends_on:
+  #     - tempo
